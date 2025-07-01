@@ -5,3 +5,5 @@ beautifulsoup4
 feedparser
 PyPDF2
 python-docx
+python-dotenv
+openai
