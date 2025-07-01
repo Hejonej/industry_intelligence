@@ -37,4 +37,4 @@ streamlit run app.py
 - **Backend**: Python
 - **API**: OpenAI GPT-3.5, Google Custom Search
 - **데이터 처리**: Pandas, BeautifulSoup, Feedparser
-- **문서 처리**: PyPDF2, python-docx 
+- **문서 처리**: PyPDF2, python-docx
