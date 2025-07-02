@@ -416,73 +416,157 @@ def extract_ym_from_text(text):
     return None
 
 def search_big4_publications(industry, report_start, report_end):
-    big4_sites = ["deloitte.com", "ey.com", "kpmg.com"]
+    # Big4 사이트별 세부 URL 목록 (PwC는 자사이므로 제외)
+    big4_sites = {
+        "Deloitte": [
+            "deloitte.com",
+            "www2.deloitte.com"
+        ],
+        "KPMG": [  # 대문자로 수정
+            "kpmg.com",
+            "home.kpmg"
+        ],
+        "EY": [
+            "ey.com",
+            "assets.ey.com"
+        ]
+    }
+    
+    # 산업별 맞춤 검색어 설정
+    industry_keywords = {
+        "Automotive & Battery": "automotive battery electric vehicle EV 자동차 배터리 전기차",
+        "Consumer & Retail & Logistics": "consumer retail logistics supply chain 소비자 유통 물류 공급망",
+        "Industrial Manufacturing": "manufacturing industrial factory 제조업 산업 공장",
+        "Technology & Media": "technology media TMT digital 기술 미디어 디지털",
+        "Financial Services": "financial banking fintech 금융 은행 핀테크",
+        "Healthcare & Life Sciences": "healthcare life sciences pharmaceutical 헬스케어 의료 제약",
+        "Energy & Resources": "energy resources renewable ESG 에너지 자원 재생에너지",
+        "Real Estate & Construction": "real estate construction property 부동산 건설"
+    }
+    
+    # 현재 산업에 맞는 키워드 가져오기
+    search_keywords = industry_keywords.get(industry, industry)
+    
     big4_data = []
     st.info(f"Big4 검색 시작: {industry}")
     api_success = False
-    for site in big4_sites:
-        query = f"site:{site} {industry} (report OR insight OR publication OR whitepaper OR 리포트 OR 보고서 OR 발간물)"
-        st.info(f"검색 중: {query}")
-        results = google_search(query)
-        if results:
-            api_success = True
-            for result in results:
-                # 발간일 추출
-                ym = extract_ym_from_text(result['title'] + ' ' + result['summary'])
-                # 날짜 필터: 발간일이 있으면 필터, 없으면 최근 10개라도 표시
-                show = False
-                if ym:
+    
+    for company, sites in big4_sites.items():
+        st.info(f"{company} 발간물 검색 중...")
+        
+        for site in sites:
+            # 기본 검색 쿼리 (도메인만 사용)
+            query = f"site:{site} {search_keywords} (report OR insight OR publication OR whitepaper OR 리포트 OR 보고서 OR 발간물 OR 인사이트)"
+            
+            st.info(f"검색 중: {query}")
+            results = google_search(query, num=5)
+            
+            if results:
+                api_success = True
+                for result in results:
+                    # 발간일 추출
+                    ym = extract_ym_from_text(result['title'] + ' ' + result['summary'])
+                    
+                    # 날짜 필터
+                    show = False
+                    if ym:
+                        try:
+                            pub_date = parser.parse(ym + '-01').date()
+                            if report_start <= pub_date <= report_end:
+                                show = True
+                        except:
+                            pass
+                    else:
+                        show = True
+                    
+                    if not show:
+                        continue
+                    
+                    # 한글 요약(OpenAI API)
+                    prompt = f"""아래는 {company}에서 발간한 {industry} 산업 관련 보고서의 정보입니다.
+- 제목: {result['title']}
+- 요약: {result['summary']}
+- 링크: {result['link']}
+
+위 정보를 바탕으로, 해당 산업 전문가가 이 보고서를 통해 무엇을 알 수 있고, 어떻게 활용할 수 있을지 1~2문장, 200자 이내, 음슴체(~함, ~임)로 요약해주세요.
+
+요약 시 주의사항:
+- 구체적인 전략, 프레임워크, 시사점이 있다면 포함
+- 지역/국가/산업별 특성이 중요하면 언급
+- 명령형 문장 금지 (~하라, ~해야 한다 등)
+- 원문에 없는 내용 추측 금지
+- 배경 설명보다는 핵심 내용과 활용 방안에 집중"""
+
                     try:
-                        pub_date = parser.parse(ym + '-01').date()
-                        if report_start <= pub_date <= report_end:
-                            show = True
-                    except:
-                        pass
-                else:
-                    show = True  # 발간일 없으면 최근 결과라도 표시
-                if not show:
-                    continue
-                # 제목에 하이퍼링크
-                title_link = f"[{result['title']}]({result['link']})"
-                # 한글 요약(OpenAI API)
-                prompt = f"아래는 Big4(예: Deloitte, EY, KPMG)에서 발간한 산업 관련 보고서의 제목, 요약, 링크임.\n- 제목: {result['title']}\n- 요약: {result['summary']}\n- 링크: {result['link']}\n위 정보를 바탕으로, 전문가가 이 보고서를 통해 무엇을 알 수 있고, 어떻게 활용할 수 있을지 1~2문장, 200자 이내, 음슴체(~함, ~임)로 요약해줘. 명령형 금지, 없는 정보는 지어내지 마."
-                try:
-                    response = client.chat.completions.create(
-                        model="gpt-3.5-turbo",
-                        messages=[{"role": "user", "content": prompt}],
-                        max_tokens=200,
-                        temperature=0.3
-                    )
-                    summary = response.choices[0].message.content.strip().replace('\n', ' ')
-                except Exception as e:
-                    summary = f"[OpenAI 요약 실패: {e}] {result['summary']}"
-                # (YY.MM 또는 -) [제목(링크)]\n: 요약
-                ym_str = f"({ym[2:]})" if ym else "(-)"
-                content = f"{ym_str} {title_link}\n: {summary}"
-                big4_data.append({
-                    "경쟁사": site.split(".")[0].capitalize(),
-                    "활동 구분": "발간물",
-                    "내용": content
-                })
-        else:
-            st.warning(f"{site}에서 검색 결과 없음")
+                        response = client.chat.completions.create(
+                            model="gpt-4",
+                            messages=[{"role": "user", "content": prompt}],
+                            max_tokens=300,
+                            temperature=0.2
+                        )
+                        summary = response.choices[0].message.content.strip().replace('\n', ' ')
+                    except Exception as e:
+                        summary = f"[OpenAI 요약 실패: {e}] {result['summary']}"
+                    
+                    # 이미지와 같은 형식: (YY.MM) [제목](링크): 요약
+                    ym_str = f"({ym[2:]})" if ym else "(-)"
+                    title_link = f"[{result['title']}]({result['link']})"
+                    content = f"{ym_str} {title_link}\n: {summary}"
+                    
+                    big4_data.append({
+                        "경쟁사": company,
+                        "활동 구분": "발간물",
+                        "내용": content,
+                        "링크": result['link']
+                    })
+            else:
+                st.warning(f"{site}에서 검색 결과 없음")
+    
+    # API 호출이 모두 실패한 경우 샘플 데이터 제공
     if not api_success:
         st.warning("Google API 호출 실패로 샘플 데이터를 표시합니다.")
         sample_data = [
             {
                 "경쟁사": "Deloitte",
                 "활동 구분": "발간물",
-                "내용": f"(25.05) [Intelligent manufacturing](https://www2.deloitte.com/global/en/industries/automotive.html)\n: AI가 제조업 경쟁력 강화에 필수로 자리잡으며, 데이터 품질·에너지 소비 등 남은 과제를 해결하기 위한 3단계 AI 도입 프레임워크를 제시함"
+                "내용": "(-) [2025 Manufacturing Industry Outlook | Deloitte Insights](https://www.deloitte.com/us/en/insights/industry/manufacturing-industrial-products/manufacturing-industry-outlook.html)\n: 이 보고서를 통해 전문가는 2025년 제조 산업의 전망과 주요 동향을 파악할 수 있으며, 이를 기반으로 기업의 전략 수립과 의사결정에 활용할 수 있음.",
+                "링크": "https://www.deloitte.com/us/en/insights/industry/manufacturing-industrial-products/manufacturing-industry-outlook.html"
             },
             {
-                "경쟁사": "Deloitte",
+                "경쟁사": "KPMG",  # 대문자로 수정
                 "활동 구분": "발간물",
-                "내용": f"(25.04) [Enhancing supply chain resilience in a new era of policy](https://www2.deloitte.com/global/en/industries/automotive.html)\n: 美 제조업체들이 관세·지정학 리스크에 대응해 리쇼어링과 공급망 재구성에 나서며, 고부가가치 중심의 회복력 전략으로 전환 중임을 설명함"
+                "내용": "(-) [KPMG global tech report – industrial manufacturing insights](https://kpmg.com/xx/en/our-insights/transformation/kpmg-global-tech-report-2024/industrial-manufacturing.html)\n: 이 보고서를 통해 전문가는 디지털 혁신을 위한 핵심 전략으로 생산 효율성, 하이브리드 모델, 혁신을 파악할 수 있으며, 이를 기반으로 산업 제조업에서 디지털 전환을 추진할 수 있음.",
+                "링크": "https://kpmg.com/xx/en/our-insights/transformation/kpmg-global-tech-report-2024/industrial-manufacturing.html"
+            },
+            {
+                "경쟁사": "EY",
+                "활동 구분": "발간물",
+                "내용": "(-) [How green manufacturing is reshaping India's industrial landscape](https://www.ey.com/content/dam/ey-unified-site/ey-com/en_in/insights/energy-resources/ey-how-green-manufacturing-is-reshaping-india-s-industrial-landscape.pdf)\n: 이 보고서를 통해 전문가는 인도의 산업 환경에서 녹색 제조업이 어떻게 변화하고 있는지를 얻을 수 있으며, 이를 통해 인도의 산업 발전 방향을 가속화하고 녹색 제조업을 가속화하는 데 활용할 수 있음.",
+                "링크": "https://www.ey.com/content/dam/ey-unified-site/ey-com/en_in/insights/energy-resources/ey-how-green-manufacturing-is-reshaping-india-s-industrial-landscape.pdf"
             }
         ]
         big4_data = sample_data
-    st.info(f"Big4 검색 완료: 총 {len(big4_data)}개 결과")
-    return big4_data
+    
+    # 중복 제거 및 정렬
+    unique_data = []
+    seen_links = set()
+    for item in big4_data:
+        if item['링크'] not in seen_links:
+            unique_data.append(item)
+            seen_links.add(item['링크'])
+    
+    # 발간일 기준으로 정렬 (최신순)
+    def get_sort_key(item):
+        content = item.get('내용', '')
+        ym_match = re.search(r'\((\d{2}\.\d{2})\)', content)
+        if ym_match:
+            return ym_match.group(1)
+        return '00.00'
+    
+    unique_data.sort(key=get_sort_key, reverse=True)
+    
+    st.info(f"Big4 검색 완료: 총 {len(unique_data)}개 결과")
+    return unique_data
 
 def search_external_publications(industry, report_start, report_end):
     external_sites = [
@@ -502,9 +586,16 @@ def search_external_publications(industry, report_start, report_end):
         if results:
             api_success = True
             for result in results:
+                # 기관명 대문자 처리
+                org_name = site.split(".")[0].upper()
+                if org_name == "MCKINSEY":
+                    org_name = "McKinsey"
+                elif org_name == "WORLDBANK":
+                    org_name = "World Bank"
+                
                 external_data.append({
                     "제목(내용)": f"{result['title']}\n: {result['summary']}",
-                    "기관/업체명": site.split(".")[0].capitalize(),
+                    "기관/업체명": org_name,  # 대문자 처리
                     "링크": result["link"]
                 })
         else:
@@ -516,17 +607,17 @@ def search_external_publications(industry, report_start, report_end):
         sample_data = [
             {
                 "제목(내용)": f"API 호출 실패로 샘플 데이터를 표시합니다.",
-                "기관/업체명": "McKinsey",
+                "기관/업체명": "McKinsey",  # 올바른 표기
                 "링크": "https://www.mckinsey.com/industries/automotive-and-assembly"
             },
             {
                 "제목(내용)": f"API 호출 실패로 샘플 데이터를 표시합니다.",
-                "기관/업체명": "BCG",
+                "기관/업체명": "BCG",  # 대문자로 수정
                 "링크": "https://www.bcg.com/industries/automotive"
             },
             {
                 "제목(내용)": f"API 호출 실패로 샘플 데이터를 표시합니다.",
-                "기관/업체명": "OECD",
+                "기관/업체명": "OECD",  # 대문자로 수정
                 "링크": "https://www.oecd.org/industry/automotive/"
             }
         ]
@@ -686,67 +777,52 @@ st.info("Deloitte, EY, KPMG의 해당 산업 관련 최신 발간물을 리서�
 if st.session_state.big4_data:
     df_big4 = pd.DataFrame(st.session_state.big4_data)
     
-    # 링크 컬럼이 없으면 추가
-    if '링크' not in df_big4.columns:
-        df_big4['링크'] = ''
+    # 컬럼 순서 정렬 (경쟁사, 활동 구분, 내용, 링크)
+    column_order = ["경쟁사", "활동 구분", "내용", "링크"]
+    df_big4 = df_big4.reindex(columns=column_order)
     
     # 내용 컬럼의 줄바꿈을 HTML <br>로 변환
     df_big4['내용'] = df_big4['내용'].apply(lambda x: x.replace('\n', '<br>') if isinstance(x, str) else x)
     
     # 링크 컬럼을 클릭 가능한 링크로 변환
-    df_big4['링크'] = df_big4['링크'].apply(lambda x: f'<a href="{x}" target="_blank">보기</a>' if x else '')
+    df_big4['링크'] = df_big4['링크'].apply(lambda x: f'<a href="{x}" target="_blank" style="color: #0066cc; text-decoration: none; font-weight: 500;">보기</a>' if x else '')
     
-    # HTML로 표시 (링크 클릭 가능)
-    st.markdown(
-        df_big4.to_html(
-            index=False,
-            escape=False,
-            classes=['dataframe'],
-            table_id='big4-table'
-        ),
-        unsafe_allow_html=True
-    )
+    # HTML 테이블로 표시
+    html_table = f"""
+    <table style="width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; font-family: Arial, sans-serif;">
+        <thead>
+            <tr style="background-color: #f0f2f6;">
+                <th style="border: 1px solid #e0e0e0; padding: 12px 8px; text-align: left; font-weight: 600; color: #262730; width: 15%;">경쟁사</th>
+                <th style="border: 1px solid #e0e0e0; padding: 12px 8px; text-align: left; font-weight: 600; color: #262730; width: 15%;">활동 구분</th>
+                <th style="border: 1px solid #e0e0e0; padding: 12px 8px; text-align: left; font-weight: 600; color: #262730; width: 60%;">내용</th>
+                <th style="border: 1px solid #e0e0e0; padding: 12px 8px; text-align: left; font-weight: 600; color: #262730; width: 10%;">링크</th>
+            </tr>
+        </thead>
+        <tbody>
+    """
     
-    # CSS 스타일 추가
-    st.markdown("""
-    <style>
-    #big4-table {
-        width: 100%;
-        border-collapse: collapse;
-        margin: 10px 0;
-        font-size: 14px;
-    }
-    #big4-table th {
-        background-color: #f0f2f6;
-        color: #262730;
-        font-weight: 600;
-        padding: 12px 8px;
-        text-align: left;
-        border-bottom: 2px solid #e0e0e0;
-    }
-    #big4-table td {
-        padding: 12px 8px;
-        border: 1px solid #e0e0e0;
-        vertical-align: top;
-        line-height: 1.5;
-    }
-    #big4-table tr:hover {
-        background-color: #f8f9fa;
-    }
-    #big4-table a {
-        color: #0066cc;
-        text-decoration: none;
-        font-weight: 500;
-    }
-    #big4-table a:hover {
-        text-decoration: underline;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    for _, row in df_big4.iterrows():
+        html_table += f"""
+            <tr style="border: 1px solid #e0e0e0;">
+                <td style="border: 1px solid #e0e0e0; padding: 12px 8px; vertical-align: top; line-height: 1.5;">{row['경쟁사']}</td>
+                <td style="border: 1px solid #e0e0e0; padding: 12px 8px; vertical-align: top; line-height: 1.5;">{row['활동 구분']}</td>
+                <td style="border: 1px solid #e0e0e0; padding: 12px 8px; vertical-align: top; line-height: 1.5;">{row['내용']}</td>
+                <td style="border: 1px solid #e0e0e0; padding: 12px 8px; vertical-align: top; line-height: 1.5; text-align: center;">{row['링크']}</td>
+            </tr>
+        """
+    
+    html_table += """
+        </tbody>
+    </table>
+    """
+    
+    st.markdown(html_table, unsafe_allow_html=True)
+    
 else:
     # 빈 표 표시 (링크 컬럼 포함)
     empty_big4_data = [{"경쟁사": "", "활동 구분": "", "내용": "", "링크": ""}]
-    st.dataframe(pd.DataFrame(empty_big4_data), use_container_width=True, hide_index=True)
+    df_empty = pd.DataFrame(empty_big4_data)
+    st.dataframe(df_empty, use_container_width=True, hide_index=True)
 
 st.markdown("<hr style='border:1px solid #e95c0f;'>", unsafe_allow_html=True)
 
