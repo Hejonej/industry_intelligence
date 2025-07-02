@@ -508,10 +508,9 @@ def search_big4_publications(industry, report_start, report_end):
                     except Exception as e:
                         summary = f"[OpenAI 요약 실패: {e}] {result['summary']}"
                     
-                    # 이미지와 같은 형식: (YY.MM) [제목](링크): 요약
-                    ym_str = f"({ym[2:]})" if ym else "(-)"
-                    title_link = f"[{result['title']}]({result['link']})"
-                    content = f"{ym_str} {title_link}\n: {summary}"
+                    # 이미지와 같은 형식: (YY.MM) 제목: 요약 (링크는 별도 컬럼)
+                    ym_str = f"({ym[2:]})" if ym else "(YY.MM)"
+                    content = f"{ym_str} {result['title']}\n: {summary}"
                     
                     big4_data.append({
                         "경쟁사": company,
@@ -529,19 +528,19 @@ def search_big4_publications(industry, report_start, report_end):
             {
                 "경쟁사": "Deloitte",
                 "활동 구분": "발간물",
-                "내용": "(-) [2025 Manufacturing Industry Outlook | Deloitte Insights](https://www.deloitte.com/us/en/insights/industry/manufacturing-industrial-products/manufacturing-industry-outlook.html)\n: 이 보고서를 통해 전문가는 2025년 제조 산업의 전망과 주요 동향을 파악할 수 있으며, 이를 기반으로 기업의 전략 수립과 의사결정에 활용할 수 있음.",
+                "내용": "(-) 2025 Manufacturing Industry Outlook | Deloitte Insights\n: 샘플데이터입니다.",
                 "링크": "https://www.deloitte.com/us/en/insights/industry/manufacturing-industrial-products/manufacturing-industry-outlook.html"
             },
             {
                 "경쟁사": "KPMG",  # 대문자로 수정
                 "활동 구분": "발간물",
-                "내용": "(-) [KPMG global tech report – industrial manufacturing insights](https://kpmg.com/xx/en/our-insights/transformation/kpmg-global-tech-report-2024/industrial-manufacturing.html)\n: 이 보고서를 통해 전문가는 디지털 혁신을 위한 핵심 전략으로 생산 효율성, 하이브리드 모델, 혁신을 파악할 수 있으며, 이를 기반으로 산업 제조업에서 디지털 전환을 추진할 수 있음.",
+                "내용": "(-) KPMG global tech report – industrial manufacturing insights\n: 샘플데이터 입니다.",
                 "링크": "https://kpmg.com/xx/en/our-insights/transformation/kpmg-global-tech-report-2024/industrial-manufacturing.html"
             },
             {
                 "경쟁사": "EY",
                 "활동 구분": "발간물",
-                "내용": "(-) [How green manufacturing is reshaping India's industrial landscape](https://www.ey.com/content/dam/ey-unified-site/ey-com/en_in/insights/energy-resources/ey-how-green-manufacturing-is-reshaping-india-s-industrial-landscape.pdf)\n: 이 보고서를 통해 전문가는 인도의 산업 환경에서 녹색 제조업이 어떻게 변화하고 있는지를 얻을 수 있으며, 이를 통해 인도의 산업 발전 방향을 가속화하고 녹색 제조업을 가속화하는 데 활용할 수 있음.",
+                "내용": "(-) How green manufacturing is reshaping India's industrial landscape\n: 샘플데이터입니다.",
                 "링크": "https://www.ey.com/content/dam/ey-unified-site/ey-com/en_in/insights/energy-resources/ey-how-green-manufacturing-is-reshaping-india-s-industrial-landscape.pdf"
             }
         ]
@@ -785,38 +784,56 @@ if st.session_state.big4_data:
     df_big4['내용'] = df_big4['내용'].apply(lambda x: x.replace('\n', '<br>') if isinstance(x, str) else x)
     
     # 링크 컬럼을 클릭 가능한 링크로 변환
-    df_big4['링크'] = df_big4['링크'].apply(lambda x: f'<a href="{x}" target="_blank" style="color: #0066cc; text-decoration: none; font-weight: 500;">보기</a>' if x else '')
+    df_big4['링크'] = df_big4['링크'].apply(lambda x: f'<a href="{x}" target="_blank">보기</a>' if x else '')
     
-    # HTML 테이블로 표시
-    html_table = f"""
-    <table style="width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 14px; font-family: Arial, sans-serif;">
-        <thead>
-            <tr style="background-color: #f0f2f6;">
-                <th style="border: 1px solid #e0e0e0; padding: 12px 8px; text-align: left; font-weight: 600; color: #262730; width: 15%;">경쟁사</th>
-                <th style="border: 1px solid #e0e0e0; padding: 12px 8px; text-align: left; font-weight: 600; color: #262730; width: 15%;">활동 구분</th>
-                <th style="border: 1px solid #e0e0e0; padding: 12px 8px; text-align: left; font-weight: 600; color: #262730; width: 60%;">내용</th>
-                <th style="border: 1px solid #e0e0e0; padding: 12px 8px; text-align: left; font-weight: 600; color: #262730; width: 10%;">링크</th>
-            </tr>
-        </thead>
-        <tbody>
-    """
+    # pandas to_html 사용으로 안전하게 표시
+    st.markdown(
+        df_big4.to_html(
+            index=False,
+            escape=False,
+            table_id='big4-table',
+            classes=['big4-table']
+        ),
+        unsafe_allow_html=True
+    )
     
-    for _, row in df_big4.iterrows():
-        html_table += f"""
-            <tr style="border: 1px solid #e0e0e0;">
-                <td style="border: 1px solid #e0e0e0; padding: 12px 8px; vertical-align: top; line-height: 1.5;">{row['경쟁사']}</td>
-                <td style="border: 1px solid #e0e0e0; padding: 12px 8px; vertical-align: top; line-height: 1.5;">{row['활동 구분']}</td>
-                <td style="border: 1px solid #e0e0e0; padding: 12px 8px; vertical-align: top; line-height: 1.5;">{row['내용']}</td>
-                <td style="border: 1px solid #e0e0e0; padding: 12px 8px; vertical-align: top; line-height: 1.5; text-align: center;">{row['링크']}</td>
-            </tr>
-        """
-    
-    html_table += """
-        </tbody>
-    </table>
-    """
-    
-    st.markdown(html_table, unsafe_allow_html=True)
+    # CSS 스타일 추가
+    st.markdown("""
+    <style>
+    .big4-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 10px 0;
+        font-size: 14px;
+        font-family: Arial, sans-serif;
+    }
+    .big4-table th {
+        background-color: #f0f2f6;
+        color: #262730;
+        font-weight: 600;
+        padding: 12px 8px;
+        text-align: left;
+        border: 1px solid #e0e0e0;
+    }
+    .big4-table td {
+        padding: 12px 8px;
+        border: 1px solid #e0e0e0;
+        vertical-align: top;
+        line-height: 1.5;
+    }
+    .big4-table tr:hover {
+        background-color: #f8f9fa;
+    }
+    .big4-table a {
+        color: #0066cc;
+        text-decoration: none;
+        font-weight: 500;
+    }
+    .big4-table a:hover {
+        text-decoration: underline;
+    }
+    </style>
+    """, unsafe_allow_html=True)
     
 else:
     # 빈 표 표시 (링크 컬럼 포함)
