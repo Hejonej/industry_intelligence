@@ -455,8 +455,12 @@ def search_big4_publications(industry, report_start, report_end):
         st.info(f"{company} 발간물 검색 중...")
         
         for site in sites:
-            # 기본 검색 쿼리 (도메인만 사용)
-            query = f"site:{site} {search_keywords} (report OR insight OR publication OR whitepaper OR 리포트 OR 보고서 OR 발간물 OR 인사이트)"
+            # 날짜 범위를 포함한 검색 쿼리
+            current_year = datetime.now().year
+            last_month = datetime.now().month - 1 if datetime.now().month > 1 else 12
+            year_for_last_month = current_year if datetime.now().month > 1 else current_year - 1
+            
+            query = f"site:{site} {search_keywords} (report OR insight OR publication OR whitepaper OR 리포트 OR 보고서 OR 발간물 OR 인사이트) after:{year_for_last_month}-{last_month:02d}-01"
             
             st.info(f"검색 중: {query}")
             results = google_search(query, num=5)
@@ -467,7 +471,7 @@ def search_big4_publications(industry, report_start, report_end):
                     # 발간일 추출
                     ym = extract_ym_from_text(result['title'] + ' ' + result['summary'])
                     
-                    # 날짜 필터
+                    # 날짜 필터 (더 엄격한 필터링)
                     show = False
                     if ym:
                         try:
@@ -477,7 +481,10 @@ def search_big4_publications(industry, report_start, report_end):
                         except:
                             pass
                     else:
-                        show = True
+                        # 날짜 정보가 없는 경우 최근 결과로 간주하여 포함
+                        # 단, 제목에 연도가 2025 이상인 경우만 포함
+                        if any(year in result['title'] for year in ['2025']):
+                            show = True
                     
                     if not show:
                         continue
