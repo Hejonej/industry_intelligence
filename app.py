@@ -350,8 +350,119 @@ def analyze_document_content(text, filename=""):
         "author": author
     }
 
-GOOGLE_API_KEY = "AIzaSyB51FOsIGLbOAXVH30HSBNYYnJosY797oM"
-CSE_ID = "a5ffa574ddd0247af"
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "AIzaSyB51FOsIGLbOAXVH30HSBNYYnJosY797oM")
+CSE_ID = os.getenv("CSE_ID", "a5ffa574ddd0247af")
+
+def extract_date_from_metadata(item):
+    """Google 검색 결과의 메타데이터에서 발행일 추출"""
+    
+    # 1. pagemap의 metatags에서 날짜 정보 찾기
+    pagemap = item.get("pagemap", {})
+    metatags = pagemap.get("metatags", [])
+    
+    # 발행일 관련 메타태그 키들
+    date_keys = [
+        'article:published_time', 'datePublished', 'publishedTime', 
+        'publication_date', 'date', 'created_time', 'dc.date',
+        'article:modified_time', 'lastmod', 'pubdate'
+    ]
+    
+    for metatag in metatags:
+        for key in date_keys:
+            if key in metatag:
+                date_str = metatag[key]
+                parsed_date = parse_date_string(date_str)
+                if parsed_date:
+                    return parsed_date
+    
+    # 2. cse_image나 기타 pagemap 데이터에서 날짜 찾기
+    for key, value_list in pagemap.items():
+        if isinstance(value_list, list):
+            for value_dict in value_list:
+                if isinstance(value_dict, dict):
+                    for field_key, field_value in value_dict.items():
+                        if any(date_word in field_key.lower() for date_word in ['date', 'time', 'published']):
+                            parsed_date = parse_date_string(field_value)
+                            if parsed_date:
+                                return parsed_date
+    
+    # 3. URL에서 날짜 패턴 찾기
+    link = item.get("link", "")
+    url_date = extract_date_from_url(link)
+    if url_date:
+        return url_date
+    
+    return None
+
+def parse_date_string(date_str):
+    """다양한 형태의 날짜 문자열을 YYYY.MM 형태로 파싱"""
+    if not date_str or not isinstance(date_str, str):
+        return None
+    
+    try:
+        # ISO 8601 형태 (2024-12-15T10:30:00Z)
+        if 'T' in date_str:
+            parsed = parser.parse(date_str)
+            return f"{parsed.year}.{parsed.month:02d}"
+        
+        # 일반적인 날짜 형태들
+        date_patterns = [
+            r'(\d{4})-(\d{1,2})-\d{1,2}',  # 2024-12-15
+            r'(\d{4})/(\d{1,2})/\d{1,2}',  # 2024/12/15
+            r'(\d{4})\.(\d{1,2})\.\d{1,2}', # 2024.12.15
+            r'(\d{1,2})-(\d{1,2})-(\d{4})', # 12-15-2024
+            r'(\d{1,2})/(\d{1,2})/(\d{4})', # 12/15/2024
+        ]
+        
+        for pattern in date_patterns:
+            match = re.search(pattern, date_str)
+            if match:
+                groups = match.groups()
+                if len(groups) >= 2:
+                    # 연도가 4자리인지 확인
+                    if len(groups[0]) == 4:
+                        year, month = groups[0], groups[1]
+                    else:
+                        year, month = groups[2], groups[0]
+                    
+                    return f"{year}.{int(month):02d}"
+        
+        # dateutil parser 시도
+        parsed = parser.parse(date_str, fuzzy=True)
+        return f"{parsed.year}.{parsed.month:02d}"
+        
+    except Exception:
+        pass
+    
+    return None
+
+def extract_date_from_url(url):
+    """URL에서 날짜 패턴 추출"""
+    if not url:
+        return None
+    
+    # URL에서 날짜 패턴 찾기 (예: /2024/12/, /2024-12-, /24/12/)
+    url_patterns = [
+        r'/(\d{4})/(\d{1,2})/',
+        r'/(\d{4})-(\d{1,2})-',
+        r'/(\d{2})/(\d{1,2})/',
+        r'(\d{4})(\d{2})\d{2}',  # 20241215 형태
+    ]
+    
+    for pattern in url_patterns:
+        match = re.search(pattern, url)
+        if match:
+            year, month = match.groups()
+            if len(year) == 2:
+                year = f"20{year}"
+            try:
+                month_int = int(month)
+                if 1 <= month_int <= 12:
+                    return f"{year}.{month_int:02d}"
+            except ValueError:
+                continue
+    
+    return None
 
 def google_search(query, cse_id=CSE_ID, api_key=GOOGLE_API_KEY, num=3):
     url = "https://www.googleapis.com/customsearch/v1"
@@ -363,13 +474,23 @@ def google_search(query, cse_id=CSE_ID, api_key=GOOGLE_API_KEY, num=3):
     }
     
     try:
+        st.info(f"Google API 호출 중: {query}")
         resp = requests.get(url, params=params)
-        resp.raise_for_status()  # HTTP 에러 체크
+        
+        # HTTP 상태 코드 확인
+        if resp.status_code != 200:
+            st.error(f"HTTP 에러 {resp.status_code}: {resp.text}")
+            return []
+            
         data = resp.json()
         
         # API 에러 체크
         if "error" in data:
-            st.error(f"Google API 에러: {data['error'].get('message', 'Unknown error')}")
+            error_msg = data['error'].get('message', 'Unknown error')
+            error_code = data['error'].get('code', 'Unknown code')
+            st.error(f"Google API 에러 [{error_code}]: {error_msg}")
+            if "quota" in error_msg.lower():
+                st.error("API 할당량이 초과되었습니다. 잠시 후 다시 시도해주세요.")
             return []
         
         # 검색 결과 확인
@@ -380,10 +501,29 @@ def google_search(query, cse_id=CSE_ID, api_key=GOOGLE_API_KEY, num=3):
         
         results = []
         for item in items:
+            # 메타데이터에서 발행일 추출 시도
+            metadata_date = extract_date_from_metadata(item)
+            
+            # 기존 텍스트 기반 날짜 추출과 병합
+            text_date = extract_ym_from_text(item["title"] + " " + item.get("snippet", ""))
+            
+            # 메타데이터 날짜를 우선으로 사용
+            publication_date = metadata_date or text_date
+            
+            # 디버깅 정보 출력
+            if metadata_date:
+                st.success(f"📅 메타데이터에서 날짜 추출: {metadata_date} - {item['title'][:50]}...")
+            elif text_date:
+                st.info(f"📝 텍스트에서 날짜 추출: {text_date} - {item['title'][:50]}...")
+            else:
+                st.warning(f"❓ 날짜 추출 실패: {item['title'][:50]}...")
+            
             results.append({
                 "title": item["title"],
                 "summary": item.get("snippet", ""),
-                "link": item["link"]
+                "link": item["link"],
+                "publication_date": publication_date,
+                "raw_metadata": item.get("pagemap", {})  # 디버깅용
             })
         
         st.success(f"검색 성공: '{query}' - {len(results)}개 결과")
@@ -468,8 +608,8 @@ def search_big4_publications(industry, report_start, report_end):
             if results:
                 api_success = True
                 for result in results:
-                    # 발간일 추출
-                    ym = extract_ym_from_text(result['title'] + ' ' + result['summary'])
+                    # 발간일 추출 - 메타데이터 우선 사용
+                    ym = result.get('publication_date')  # 새로운 방식
                     
                     # 날짜 필터 (더 엄격한 필터링)
                     show = False
